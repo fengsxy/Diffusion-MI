@@ -25,7 +25,12 @@ class VP_SDE():
         self.importance_sampling = importance_sampling
         self.nb_var = len(self.var_sizes)
         self.weight_s_functions = weight_s_functions
-        self.device = "cuda"
+        # By default, place tensors on CUDA only when it is
+        # actually available; otherwise stay on CPU. Using
+        # ``torch.cuda.is_available()`` here avoids triggering
+        # CUDA initialization (and associated driver errors) on
+        # CPU-only environments such as CI.
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.type = type
         self.masks = self.get_masks_training()
        
