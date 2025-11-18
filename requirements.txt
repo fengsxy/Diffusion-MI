@@ -3,6 +3,10 @@ lightning
 torch
 torchvision 
 torchaudio
+numpy
+scipy
 matplotlib
 tensorboardX
-scipy
+tqdm
+scikit-learn
+huggingface-hub
