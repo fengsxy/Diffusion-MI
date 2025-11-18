@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "diffusion-mi"
+version = "0.1.0"
+description = "Diffusion Mutual Information (DMI) estimators and benchmarks"
+authors = [
+    "fengsxy <longxuan.yu@email.ucr.edu>",
+    "kxh001 <xianghao.kong@email.ucr.edu>",
+    "Tong <amazingjtt@gmail.com>",
+    "Xing Shi <xshi068@ucr.edu>"
+]
+readme = "README.MD"
+license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+packages = [{include = "*", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.13"
+pytorch-lightning = "*"
+lightning = "*"
+torch = "*"
+torchvision = "*"
+torchaudio = "*"
+matplotlib = "*"
+tensorboardX = "*"
+
+[tool.poetry.urls]
+Homepage = "https://github.com/fengsxy/mi_estimators"
+Repository = "https://github.com/fengsxy/mi_estimators.git"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

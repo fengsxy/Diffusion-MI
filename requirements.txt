@@ -1,0 +1,7 @@
+pytorch-lightning
+lightning
+torch
+torchvision 
+torchaudio
+matplotlib
+tensorboardX
