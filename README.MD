@@ -50,44 +50,68 @@ import dmi
 
 ---
 
-### Quick Start: Estimate MI on Your Own Data
+### Quick Start: Fit, Then Estimate MI on Your Own Data
 
 You can apply any estimator to your own data `(X, Y)` as long as:
 - `X` and `Y` are arrays of shape `(n_samples, dim_x)` and
   `(n_samples, dim_y)` respectively (NumPy arrays or similar), and
-- The shapes are consistent with the `x_shape` / `y_shape` you pass
-  when constructing the estimator.
+- Their shapes are compatible with the estimator you choose.
+
+The typical workflow is always:
+
+1. **Construct** an estimator with your desired hyperparameters.
+2. **Fit** it on training data via `.fit(X_train, Y_train, X_val=None, Y_val=None)`.
+3. **Estimate** MI on new data via `.estimate(X_test, Y_test)`.
 
 ```python
 import numpy as np
 import dmi
 
 # Example: a simple 1D correlated Gaussian
-n = 2000
+n_train, n_test = 2000, 1000
 dim_x, dim_y = 1, 1
 rho = 0.75
 rng = np.random.default_rng(0)
-x = rng.normal(size=(n, dim_x))
-eps = rng.normal(size=(n, dim_y))
-y = rho * x + np.sqrt(1.0 - rho ** 2) * eps
 
+def sample_gaussian(n, seed):
+    rng = np.random.default_rng(seed)
+    x = rng.normal(size=(n, dim_x))
+    eps = rng.normal(size=(n, dim_y))
+    y = rho * x + np.sqrt(1.0 - rho ** 2) * eps
+    return x, y
+
+X_train, Y_train = sample_gaussian(n_train, seed=0)
+X_test, Y_test = sample_gaussian(n_test, seed=1)
+
+# Construct a neural MI estimator
 estimator = dmi.estimators.MINEEstimator(
-    x_shape=(dim_x,),
-    y_shape=(dim_y,),
-    max_n_steps=500,
+    learning_rate=1e-4,
     batch_size=256,
+    max_n_steps=3000,
 )
 
-mi_hat = estimator.estimate(x, y)
+# 1) Fit on training data
+estimator.fit(X_train, Y_train)
+
+# 2) Estimate MI on held-out data
+mi_hat = estimator.estimate(X_test, Y_test)
 print("Estimated MI (MINE):", float(mi_hat))
 ```
 
-Different estimators have slightly different initialization options,
-but the overall pattern is always:
-- Provide `x_shape` / `y_shape` (typically `(dim_x,)` / `(dim_y,)`),
-- Configure training hyperparameters such as `max_n_steps`,
-  `max_epochs`, learning rate, and batch size, and
-- Call `.estimate(X, Y)` to obtain an MI estimate.
+Notes on shapes and initialization:
+
+- Most estimators (CPC/DoE/NWJ/SMILE/MINE/DIME) can **infer**
+  `x_shape` / `y_shape` automatically from the first call to
+  `.fit(X, Y)`.
+- Diffusion/SDE-based estimators (`MINDEEstimator`, `MMGEstimator`)
+  also support lazy initialization: if you omit `x_shape` / `y_shape`
+  in the constructor, they will infer the shapes at the first
+  `.fit(X, Y, ...)` call and build their internal U-Net architectures
+  accordingly.
+
+In all cases, `.estimate(X, Y)` performs **no further training**: it
+uses the current model parameters to compute an MI estimate on the
+provided data.
 
 ---
 
@@ -136,9 +160,10 @@ The main estimators exposed via `dmi.estimators` include:
 - `NWJEstimator` — NWJ lower bound (an f-divergence based estimator).
 - `SMILEEstimator` — A stabilized MI lower-bound estimator.
 - `DIMEEstimator` — Diffusion-based MI estimator.
-- `MINDEEstimator` — SDE-based MI estimator.
-- `MMGEstimator` — Diffusion-based multi-modal MI estimator (from
-  diffusion-style MIND variants).
+- `MINDEEstimator` — SDE-based MI estimator, based on the MINDE
+  method (see arXiv:2310.09031).
+- `MMGEstimator` — Diffusion-based multi-modal MI estimator, based on
+  the MMG method (see arXiv:2509.20609).
 
 You can inspect the available estimators, for example, with:
 
@@ -170,8 +195,44 @@ These are installed automatically when using `pip install diffusion-mi`.
 
 ### Citation and Acknowledgements
 
-The design of some estimators and benchmarks is inspired by existing
-papers and open-source projects. If you use this repository in
-academic work, please consider citing it as
-"Diffusion Mutual Information (DMI)".
+The design of the estimators in this repository is inspired by
+several existing mutual-information estimators and diffusion-based
+methods. If you use this repository in academic work, please consider
+citing it as "Diffusion Mutual Information (DMI)" and, where
+appropriate, the original works listed below.
 
+**Estimator References (non-exhaustive)**
+
+- `CPCEstimator` — Contrastive Predictive Coding (CPC) estimator,
+  based on:
+  - A. van den Oord, Y. Li, O. Vinyals, "Representation Learning with
+    Contrastive Predictive Coding", arXiv:1807.03748.
+
+- `MINEEstimator` — Mutual Information Neural Estimation, based on:
+  - M. I. Belghazi et al., "Mutual Information Neural Estimation",
+    ICML 2018, arXiv:1801.04062.
+
+- `NWJEstimator` — NWJ lower-bound estimator, using the Nguyen–
+  Wainwright–Jordan f-divergence bound:
+  - X. Nguyen, M. J. Wainwright, M. I. Jordan, "Estimating divergence
+    functionals and the likelihood ratio by convex risk minimization",
+    Annals of Statistics, 2010.
+
+- `SMILEEstimator` — Implementation of the SMILE mutual information
+  estimator; see the original SMILE MI paper for details.
+
+- `DoEEstimator` — Density-of-States style estimator; this
+  implementation follows the DoE estimator found in MI benchmarking
+  codebases (e.g. `benchmark-mi`) and related literature.
+
+- `DIMEEstimator` — Diffusion-based MI estimator; this implementation
+  follows the DIME-style neural estimator from the diffusion MI
+  literature.
+
+- `MINDEEstimator` — SDE-based MI estimator, based on the MINDE
+  method:
+  - MINDE: see arXiv:2310.09031.
+
+- `MMGEstimator` — Diffusion-based multi-modal MI estimator, based on
+  the MMG method:
+  - MMG: see arXiv:2509.20609.

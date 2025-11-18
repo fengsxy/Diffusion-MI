@@ -14,10 +14,10 @@ from ._critic import MLP, ConvCritic
 
 class MINEEstimator(L.LightningModule):
     def __init__(self, 
-                 x_shape,
-                 y_shape,
-                 learning_rate,
-                 batch_size,
+                 x_shape=None,
+                 y_shape=None,
+                 learning_rate=1e-4,
+                 batch_size=256,
                  max_n_steps=None,
                  max_epochs=None,
                  hidden_layers=(100, 100),
@@ -119,9 +119,15 @@ class MINEEstimator(L.LightningModule):
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
         
-        if X.shape[1:] != self.hparams.x_shape or Y.shape[1:] != self.hparams.y_shape:
-            raise ValueError(f"Input shapes do not match. Expected X shape: {self.hparams.x_shape}, "
-                            f"Y shape: {self.hparams.y_shape}. Got X shape: {X.shape[1:]}, Y shape: {Y.shape[1:]}")
+        # Infer shapes from data if not provided at construction time.
+        if self.hparams.x_shape is None or self.hparams.y_shape is None:
+            self.hparams.x_shape = X.shape[1:]
+            self.hparams.y_shape = Y.shape[1:]
+        elif X.shape[1:] != self.hparams.x_shape or Y.shape[1:] != self.hparams.y_shape:
+            raise ValueError(
+                f"Input shapes do not match. Expected X shape: {self.hparams.x_shape}, "
+                f"Y shape: {self.hparams.y_shape}. Got X shape: {X.shape[1:]}, Y shape: {Y.shape[1:]}"
+            )
 
         X = torch.tensor(X, dtype=torch.float32).to(self.device)
         Y = torch.tensor(Y, dtype=torch.float32).to(self.device)

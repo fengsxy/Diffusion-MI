@@ -31,6 +31,7 @@ torchvision = "*"
 torchaudio = "*"
 matplotlib = "*"
 tensorboardX = "*"
+scipy = "*"
 
 [tool.poetry.urls]
 Homepage = "https://github.com/fengsxy/mi_estimators"

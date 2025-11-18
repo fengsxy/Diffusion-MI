@@ -16,8 +16,8 @@ import argparse
 
 class MINDEEstimator(pl.LightningModule):
     def __init__(self,
-                 x_shape=(1,),
-                 y_shape=(1,),
+                 x_shape=None,
+                 y_shape=None,
                  learning_rate=5e-5,
                  batch_size=64,
                  max_n_steps=None,
@@ -47,25 +47,14 @@ class MINDEEstimator(pl.LightningModule):
         super(MINDEEstimator, self).__init__()
         self.save_hyperparameters()
 
-    
+        # Lazily initialized components that depend on x_shape/y_shape.
         self.var_list = ["x0", "x1"]
-        self.sizes = [np.prod(x_shape), np.prod(y_shape)]
-        
-        if hidden_dim is None:
-            hidden_dim = self.calculate_hidden_dim()
-        
-        if arch == "mlp":
-            self.score = UnetMLP_simple(dim=np.sum(self.sizes), init_dim=hidden_dim, dim_mults=[],
-                                        time_dim=hidden_dim, nb_var=len(self.var_list))
-        else:
-            raise NotImplementedError
-
-        self.model_ema = EMA(self.score, decay=ema_decay) if use_ema else None
+        self.sizes = None
+        self.score = None
+        self.model_ema = None
         self.use_ema = use_ema
-        self.sde = VP_SDE(importance_sampling=True,
-                          var_sizes=self.sizes, type=type)
-   
-        
+        self.sde = None
+
         self.smoothed_mi_history = []
         
         if early_stopping and early_stopping_params is None:
@@ -129,6 +118,28 @@ class MINDEEstimator(pl.LightningModule):
             self.smoothed_mi_history.append(mi)
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
+        # Infer shapes and lazily initialize networks / SDE at first fit.
+        if self.hparams.x_shape is None or self.hparams.y_shape is None:
+            self.hparams.x_shape = X.shape[1:]
+            self.hparams.y_shape = Y.shape[1:]
+
+        if self.sizes is None or self.score is None or self.sde is None:
+            self.sizes = [np.prod(self.hparams.x_shape), np.prod(self.hparams.y_shape)]
+            hidden_dim = self.calculate_hidden_dim()
+            if self.arch == "mlp":
+                self.score = UnetMLP_simple(
+                    dim=np.sum(self.sizes),
+                    init_dim=hidden_dim,
+                    dim_mults=[],
+                    time_dim=hidden_dim,
+                    nb_var=len(self.var_list),
+                )
+            else:
+                raise NotImplementedError
+
+            self.model_ema = EMA(self.score, decay=self.hparams.ema_decay) if self.use_ema else None
+            self.sde = VP_SDE(importance_sampling=True, var_sizes=self.sizes, type=self.hparams.type)
+
         if self.hparams.preprocessing == "rescale":
             X = preprocessing.StandardScaler(copy=True).fit_transform(X)
             Y = preprocessing.StandardScaler(copy=True).fit_transform(Y)

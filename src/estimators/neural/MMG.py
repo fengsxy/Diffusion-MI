@@ -37,8 +37,8 @@ class Denoiser(nn.Module):
 
 class MMGEstimator(pl.LightningModule):
     def __init__(self, 
-             x_shape=(1,), 
-             y_shape=(1,),
+             x_shape=None, 
+             y_shape=None,
              learning_rate=1e-4, 
              batch_size=512,
              logsnr_loc=2., 
@@ -59,15 +59,16 @@ class MMGEstimator(pl.LightningModule):
              # no-op in current implementation.
              log_to_tensorboard: bool = False,
              enable_plot: bool = False):
-
         super().__init__()
         self.save_hyperparameters()
-        self.d_x = np.prod(x_shape)
-        self.d_y = np.prod(y_shape)
-        self.h_g = 0.5 * self.d_x * math.log(2 * math.pi * math.e)
-        self.left = (-1,) + (1,) * len(x_shape)
+
+        # Lazily initialized components that depend on x_shape/y_shape.
+        self.d_x = None
+        self.d_y = None
+        self.h_g = None
+        self.left = None
         self.mi_estimation_interval = mi_estimation_interval
-        self.model = Denoiser(self.d_x, self.d_y)
+        self.model = None
         self.task_name = task_name
         self.logger_name = f"mind_estimator_{task_name}_seed_{seed}_lr_{learning_rate}_update_{update_logsnr_loc_flag}"
         self.task_gt = task_gt
@@ -80,9 +81,11 @@ class MMGEstimator(pl.LightningModule):
             self.logger_name += f"_max_steps_{max_n_steps}"
         if max_epochs:
             self.logger_name += f"_max_epochs_{max_epochs}"
-        self.logsnr_loc = t.tensor(logsnr_loc, device=self.device)
+        # Will be converted to tensors on the appropriate device
+        # inside ``logistic_integrate``.
+        self.logsnr_loc = logsnr_loc
         self.update_logsnr_loc_flag = update_logsnr_loc_flag
-        self.model_ema = EMA(self.model, decay=ema_decay) if use_ema else None
+        self.model_ema = None
         self.plotter = None
 
     def on_before_backward(self, loss: t.Tensor) -> None:
@@ -230,6 +233,20 @@ class MMGEstimator(pl.LightningModule):
         if X_val is None or Y_val is None:
             raise ValueError("MMGEstimator.fit requires validation data X_val and Y_val.")
         train_sample_num = len(X)
+
+        # Infer shapes and lazily initialize the denoiser network at
+        # first fit if x_shape / y_shape were not provided.
+        if self.hparams.x_shape is None or self.hparams.y_shape is None:
+            self.hparams.x_shape = X.shape[1:]
+            self.hparams.y_shape = Y.shape[1:]
+
+        if self.d_x is None or self.model is None:
+            self.d_x = int(np.prod(self.hparams.x_shape))
+            self.d_y = int(np.prod(self.hparams.y_shape))
+            self.h_g = 0.5 * self.d_x * math.log(2 * math.pi * math.e)
+            self.left = (-1,) + (1,) * len(self.hparams.x_shape)
+            self.model = Denoiser(self.d_x, self.d_y)
+            self.model_ema = EMA(self.model, decay=self.hparams.ema_decay) if self.use_ema else None
         
         dataset = TensorDataset(t.tensor(X, dtype=t.float32), t.tensor(Y, dtype=t.float32))
         train_data_loader = DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=True) 

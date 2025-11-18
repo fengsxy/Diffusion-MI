@@ -103,7 +103,7 @@ def test_mind_estimator_smoke_on_bmi_gaussian():
     model.fit(x_train_s, y_train_s, x_val_s, y_val_s)
 
     # Estimate MI on the validation set.
-    mi_estimate, _ = model.estimate(x_val_s, y_val_s)
+    mi_estimate = model.estimate(x_val_s, y_val_s)
 
     # Basic sanity checks: value should be finite and not explode.
     assert np.isfinite(mi_estimate), "MI estimate should be finite"

@@ -58,8 +58,8 @@ class CombinedArchitecture(nn.Module):
 class DIMEEstimator(L.LightningModule):
     def __init__(
         self,
-        x_shape,  # TODO Unused variable.
-        y_shape,
+        x_shape=None,  # Optional; inferred from data if not provided.
+        y_shape=None,
         learning_rate=1e-4,
         batch_size=256,
         max_n_steps=1000,
@@ -197,9 +197,10 @@ class DIMEEstimator(L.LightningModule):
             print(warning_message)
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
-        # if X.shape[1:] != self.hparams.x_shape or Y.shape[1:] != self.hparams.y_shape:
-        #     raise ValueError(f"Input shapes do not match. Expected X shape: {self.hparams.x_shape}, "
-        #                     f"Y shape: {self.hparams.y_shape}. Got X shape: {X.shape[1:]}, Y shape: {Y.shape[1:]}")
+        # Infer shapes from data if not provided at construction time.
+        if self.hparams.x_shape is None or self.hparams.y_shape is None:
+            self.hparams.x_shape = X.shape[1:]
+            self.hparams.y_shape = Y.shape[1:]
 
         X = torch.tensor(X, dtype=torch.float32)
         Y = torch.tensor(Y, dtype=torch.float32)

@@ -5,3 +5,4 @@ torchvision
 torchaudio
 matplotlib
 tensorboardX
+scipy
