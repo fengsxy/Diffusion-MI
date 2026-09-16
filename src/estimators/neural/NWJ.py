@@ -9,6 +9,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from ._critic import MLP, ConvCritic
 
+from ._validation import validate_inputs, validate_validation
+
 class NWJEstimator:
     def __init__(
         self,
@@ -57,6 +59,9 @@ class NWJEstimator:
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None, early_stopping: bool = False,
             early_stopping_patience: int = 10, early_stopping_min_delta: float = 0.0):
+        X, Y = validate_inputs(self, X, Y, fitting=True)
+        X_val, Y_val = validate_validation(X_val, Y_val, X, Y)
+        self._is_fitted = False
         X = torch.tensor(X, dtype=torch.float32).to(self.device)
         Y = torch.tensor(Y, dtype=torch.float32).to(self.device)
 
@@ -71,7 +76,7 @@ class NWJEstimator:
 
         optimizer = optim.Adam(self.critic.parameters(), lr=self.learning_rate)
         dataset = TensorDataset(X, Y)
-        dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True, drop_last=True)
+        dataloader = DataLoader(dataset, batch_size=min(self.batch_size, len(X)), shuffle=True, drop_last=True)
 
         steps = 0
         best_loss = float('inf')
@@ -106,14 +111,18 @@ class NWJEstimator:
                         if no_improve >= early_stopping_patience:
                             pbar.set_postfix({'loss': loss.item(), 'early_stop': True})
                             pbar.close()
-                            return
+                            self._is_fitted = True
+                            return self
 
                 if steps >= self.max_n_steps:
                     break
 
         pbar.close()
+        self._is_fitted = True
+        return self
 
     def estimate(self, X: np.ndarray, Y: np.ndarray) -> float:
+        X, Y = validate_inputs(self, X, Y)
         X = torch.tensor(X, dtype=torch.float32).to(self.device)
         Y = torch.tensor(Y, dtype=torch.float32).to(self.device)
 

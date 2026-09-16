@@ -14,6 +14,8 @@ from ._critic import UnetMLP_simple
 import json
 import argparse
 
+from ._validation import validate_inputs, validate_validation, training_limits
+
 class MINDEEstimator(pl.LightningModule):
     def __init__(self,
                  x_shape=None,
@@ -57,6 +59,8 @@ class MINDEEstimator(pl.LightningModule):
 
         self.smoothed_mi_history = []
         
+        self.early_stopping_params = early_stopping_params
+        self.checkpoint_params = checkpoint_params
         if early_stopping and early_stopping_params is None:
             self.early_stopping_params = {
                 'monitor': 'train_loss',
@@ -78,8 +82,8 @@ class MINDEEstimator(pl.LightningModule):
         if max_epochs:
             self.logger_name += f"_max_epochs_{max_epochs}"
         self.arch = arch
-        #if seed is not None:
-            #pl.seed_everything(seed, workers=True)
+        if seed is not None:
+            pl.seed_everything(seed, workers=True)
 
         
 
@@ -118,6 +122,9 @@ class MINDEEstimator(pl.LightningModule):
             self.smoothed_mi_history.append(mi)
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
+        X, Y = validate_inputs(self, X, Y, fitting=True)
+        X_val, Y_val = validate_validation(X_val, Y_val, X, Y)
+        self._is_fitted = False
         # Infer shapes and lazily initialize networks / SDE at first fit.
         if self.hparams.x_shape is None or self.hparams.y_shape is None:
             self.hparams.x_shape = X.shape[1:]
@@ -125,7 +132,7 @@ class MINDEEstimator(pl.LightningModule):
 
         if self.sizes is None or self.score is None or self.sde is None:
             self.sizes = [np.prod(self.hparams.x_shape), np.prod(self.hparams.y_shape)]
-            hidden_dim = self.calculate_hidden_dim()
+            hidden_dim = self.hparams.hidden_dim or self.calculate_hidden_dim()
             if self.arch == "mlp":
                 self.score = UnetMLP_simple(
                     dim=np.sum(self.sizes),
@@ -138,11 +145,13 @@ class MINDEEstimator(pl.LightningModule):
                 raise NotImplementedError
 
             self.model_ema = EMA(self.score, decay=self.hparams.ema_decay) if self.use_ema else None
-            self.sde = VP_SDE(importance_sampling=True, var_sizes=self.sizes, type=self.hparams.type)
+            self.sde = VP_SDE(importance_sampling=self.hparams.importance_sampling, var_sizes=self.sizes, type=self.hparams.type)
 
         if self.hparams.preprocessing == "rescale":
-            X = preprocessing.StandardScaler(copy=True).fit_transform(X)
-            Y = preprocessing.StandardScaler(copy=True).fit_transform(Y)
+            self.x_scaler_ = preprocessing.StandardScaler().fit(X)
+            self.y_scaler_ = preprocessing.StandardScaler().fit(Y)
+            X = self.x_scaler_.transform(X)
+            Y = self.y_scaler_.transform(Y)
         X = torch.tensor(X, dtype=torch.float32)
         Y = torch.tensor(Y, dtype=torch.float32)
 
@@ -152,8 +161,8 @@ class MINDEEstimator(pl.LightningModule):
             # Preprocess and convert test samples to torch tensors so that
             # ``compute_mi`` can safely call ``.to(self.device)`` on them.
             if self.hparams.preprocessing == "rescale":
-                X_test_p = preprocessing.StandardScaler(copy=True).fit_transform(X_val)
-                Y_test_p = preprocessing.StandardScaler(copy=True).fit_transform(Y_val)
+                X_test_p = self.x_scaler_.transform(X_val)
+                Y_test_p = self.y_scaler_.transform(Y_val)
             else:
                 X_test_p, Y_test_p = X_val, Y_val
 
@@ -178,7 +187,7 @@ class MINDEEstimator(pl.LightningModule):
         trainer = pl.Trainer(
             logger=False,
             callbacks=callbacks,
-            max_epochs=self.hparams.max_epochs,
+            **training_limits(self.hparams.max_n_steps, self.hparams.max_epochs),
             # Disable Lightning's default checkpointing; explicit
             # ModelCheckpoint callbacks above are still honored when
             # ``create_checkpoint`` is True.
@@ -190,11 +199,14 @@ class MINDEEstimator(pl.LightningModule):
         )
 
         trainer.fit(self, train_loader)
+        self._is_fitted = True
+        return self
 
     def estimate(self, X: np.ndarray, Y: np.ndarray) -> float:
+        X, Y = validate_inputs(self, X, Y)
         if self.hparams.preprocessing == "rescale":
-            X = preprocessing.StandardScaler(copy=True).fit_transform(X)
-            Y = preprocessing.StandardScaler(copy=True).fit_transform(Y)
+            X = self.x_scaler_.transform(X)
+            Y = self.y_scaler_.transform(Y)
         X = torch.tensor(X, dtype=torch.float32)
         Y = torch.tensor(Y, dtype=torch.float32)
         
@@ -210,37 +222,6 @@ class MINDEEstimator(pl.LightningModule):
             t = t * (1 - cond) + 0.0 * cond
             t = t * (1 - marg) + 1 * marg
             return self.score(x, t=t, std=std)
-
-    def score_inference(self, x, t=None, mask=None, std=None):
-        """
-        Perform score inference on the input data.
-
-        Args:
-            x (torch.Tensor): Concatenated variables.
-            t (torch.Tensor, optional): The time t. 
-            mask (torch.Tensor, optional): The mask data.
-            std (torch.Tensor, optional): The standard deviation to rescale the network output.
-
-        Returns:
-            torch.Tensor: The output score function (noise/std) if std !=None , else return noise .
-        """
-        # Get the model to use for inference, use the ema model if use_ema is set to True
-
-        score = self.model_ema.module if self.use_ema else self.score
-        with torch.no_grad():
-            score.eval()
-            
-            if self.args.arch == "mlp":
-                t = t.expand(t.shape[0],mask.size(-1)) 
-          
-                marg = (- mask).clip(0, 1) ## max <0 
-                cond = 1 - (mask.clip(0, 1)) - marg  ##mask ==0
-             
-                t = t * (1- cond)  + 0.0 * cond
-                t = t* (1-marg) + 1 * marg
-
-                
-                return score(x, t=t, std=std)
 
     def compute_mi(self, data=None, eps=1e-5):
         self.eval()

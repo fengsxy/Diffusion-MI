@@ -1,8 +1,6 @@
 from __future__ import print_function, division
 import torch
 import torch.optim as optim
-import torchvision
-from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler, random_split
 from torch import nn
 import torch.nn.functional as F

@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from .TrainerFactory import TrainerFactory
 from ._critic import MLP, ConvCritic
 
+from ._validation import validate_inputs, validate_validation
+
 class MINEEstimator(L.LightningModule):
     def __init__(self, 
                  x_shape=None,
@@ -108,7 +110,7 @@ class MINEEstimator(L.LightningModule):
         
         loss = -mi_estimate
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.smoothed_mi_history.append(mi_estimate)
+        self.smoothed_mi_history.append(float(mi_estimate.detach()))
         return loss
     
     def on_train_end(self):
@@ -118,6 +120,9 @@ class MINEEstimator(L.LightningModule):
             print(warning_message)
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
+        X, Y = validate_inputs(self, X, Y, fitting=True)
+        X_val, Y_val = validate_validation(X_val, Y_val, X, Y)
+        self._is_fitted = False
         
         # Infer shapes from data if not provided at construction time.
         if self.hparams.x_shape is None or self.hparams.y_shape is None:
@@ -160,8 +165,11 @@ class MINEEstimator(L.LightningModule):
             test_num=self.hparams.test_num
         )
         trainer.fit(self, dataloader)
+        self._is_fitted = True
+        return self
 
     def estimate(self, X: np.ndarray, Y: np.ndarray) -> float:
+        X, Y = validate_inputs(self, X, Y)
         X = torch.tensor(X, dtype=torch.float32).to(self.device)
         Y = torch.tensor(Y, dtype=torch.float32).to(self.device)
 

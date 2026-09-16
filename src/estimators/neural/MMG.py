@@ -13,6 +13,8 @@ from ._critic import UnetMLP
 from sklearn import preprocessing
 from .libs.util import EMA, SNRMMSEPlotter
 
+from ._validation import validate_inputs, validate_validation, training_limits
+
 class Denoiser(nn.Module):
     def __init__(self, x_dim, y_dim, hidden_dim=128, n_layers=3, emb_size=64):
         super().__init__()
@@ -61,6 +63,8 @@ class MMGEstimator(pl.LightningModule):
              enable_plot: bool = False):
         super().__init__()
         self.save_hyperparameters()
+        if seed is not None:
+            pl.seed_everything(seed, workers=True)
 
         # Lazily initialized components that depend on x_shape/y_shape.
         self.d_x = None
@@ -221,17 +225,15 @@ class MMGEstimator(pl.LightningModule):
             trainer_kwargs['accelerator'] = 'gpu' if t.cuda.is_available() else 'cpu'
         trainer_kwargs.setdefault('devices', 1)
        
-        if self.hparams.max_n_steps:
-            trainer_kwargs['max_steps'] = self.hparams.max_n_steps
-        if self.hparams.max_epochs:
-            trainer_kwargs['max_epochs'] = self.hparams.max_epochs
+        trainer_kwargs.update(training_limits(self.hparams.max_n_steps, self.hparams.max_epochs))
 
         trainer = pl.Trainer(**trainer_kwargs)
         return trainer
     
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
-        if X_val is None or Y_val is None:
-            raise ValueError("MMGEstimator.fit requires validation data X_val and Y_val.")
+        X, Y = validate_inputs(self, X, Y, fitting=True)
+        X_val, Y_val = validate_validation(X_val, Y_val, X, Y)
+        self._is_fitted = False
         train_sample_num = len(X)
 
         # Infer shapes and lazily initialize the denoiser network at
@@ -250,15 +252,19 @@ class MMGEstimator(pl.LightningModule):
         
         dataset = TensorDataset(t.tensor(X, dtype=t.float32), t.tensor(Y, dtype=t.float32))
         train_data_loader = DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=True) 
-        validation_dataset = TensorDataset(t.tensor(X_val, dtype=t.float32), t.tensor(Y_val, dtype=t.float32))
-        validation_dataloader = DataLoader(validation_dataset, batch_size=self.hparams.test_batch_size, shuffle=False)
+        validation_dataloader = None
+        if X_val is not None:
+            validation_dataset = TensorDataset(t.tensor(X_val, dtype=t.float32), t.tensor(Y_val, dtype=t.float32))
+            validation_dataloader = DataLoader(validation_dataset, batch_size=self.hparams.test_batch_size, shuffle=False)
 
         trainer = self.configure_trainer(train_sample_num)
         trainer.fit(model=self, train_dataloaders=train_data_loader,
                 val_dataloaders=validation_dataloader)
+        self._is_fitted = True
         return self
 
     def estimate(self, X, Y, n_samples=1000) -> float:
+        X, Y = validate_inputs(self, X, Y)
         self.eval()
         tmp_model = self.model
         self.model = self.model_ema.module if self.use_ema else self.model

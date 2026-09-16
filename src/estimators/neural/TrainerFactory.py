@@ -2,6 +2,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 import lightning as L
 import torch
 from typing import Dict, Any
+from ._validation import training_limits
 
 
 class TrainerFactory:
@@ -17,7 +18,6 @@ class TrainerFactory:
 
         # Configure Early Stopping
         if 'early_stopping' in trainer_config and trainer_config['early_stopping'] is not None:
-            print(trainer_config['early_stopping']) 
             early_stop_callback = EarlyStopping(**trainer_config['early_stopping'])
             callbacks.append(early_stop_callback)
 
@@ -40,16 +40,15 @@ class TrainerFactory:
         # (no DDP) unless explicitly overridden via ``trainer``
         # kwargs.
         trainer_kwargs = trainer_config.get('trainer', {}).copy()
+        trainer_kwargs.update(training_limits(trainer_kwargs.get('max_steps'), trainer_kwargs.get('max_epochs')))
         use_gpu = torch.cuda.is_available()
         trainer_kwargs.setdefault('accelerator', 'gpu' if use_gpu else 'cpu')
         trainer_kwargs.setdefault('devices', 1)
         trainer_kwargs.update({
             'callbacks': callbacks,
             'logger': logger,
-            # Disable Lightning's default checkpointing callback to avoid
-            # filesystem permission and cross-device issues; explicit
-            # ModelCheckpoint callbacks above still function normally.
-            'enable_checkpointing': False,
+            # Enable checkpointing only when explicitly requested.
+            'enable_checkpointing': any(isinstance(cb, ModelCheckpoint) for cb in callbacks),
         })
 
         return L.Trainer(**trainer_kwargs)

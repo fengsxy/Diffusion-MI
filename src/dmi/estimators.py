@@ -1,25 +1,29 @@
-"""Public estimators API for :mod:`dmi`.
+"""Public estimator classes, imported only when requested.
 
-This module re-exports the neural mutual information estimators from
-``estimators.neural`` under the :mod:`dmi.estimators` namespace so that
-users can simply do::
-
-    from dmi import estimators
-    mi_estimator = estimators.DIMEEstimator(...)
+Example: ``from dmi.estimators import MMGEstimator``.
 """
+from importlib import import_module
 
-from __future__ import annotations
+_MODULES = {
+    "CPCEstimator": "CPC",
+    "DoEEstimator": "DOE",
+    "MINEEstimator": "MINE",
+    "NWJEstimator": "NWJ",
+    "SMILEEstimator": "SMILE",
+    "DIMEEstimator": "DIME",
+    "MINDEEstimator": "MINDE",
+    "MMGEstimator": "MMG",
+}
+__all__ = list(_MODULES)
 
-try:  # pragma: no cover - import-time wiring
-    # The concrete implementations live in the internal
-    # ``estimators.neural`` package shipped with this distribution.
-    from estimators.neural import *  # type: ignore
-except Exception as exc:  # pragma: no cover - defensive fallback
-    # If the internal package is unavailable, expose a helpful error
-    # message when any estimator is accessed.
-    raise ImportError(
-        "dmi.estimators requires the internal 'estimators.neural' "
-        "package to be importable. Make sure diffusion-mi is installed "
-        "correctly."
-    ) from exc
 
+def __getattr__(name):
+    if name not in _MODULES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    cls = getattr(import_module(f"estimators.neural.{_MODULES[name]}"), name)
+    globals()[name] = cls
+    return cls
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

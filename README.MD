@@ -1,238 +1,169 @@
-## Diffusion Mutual Information (DMI)
+<p align="center">
+  <img src="docs/assets/diffusion-mi-logo.png" width="600" alt="Diffusion-MI logo">
+</p>
 
-`diffusion-mi` (short for **Diffusion Mutual Information**, DMI) is a
-PyTorch-based toolbox for estimating mutual information (MI), with a
-focus on diffusion-style and neural estimators.
+<h1 align="center">Diffusion-MI</h1>
+<p align="center"><strong>Mutual information estimation. One fit/estimate interface.</strong></p>
+<p align="center">
+  <a href="https://pypi.org/project/diffusion-mi/">PyPI</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#choose-an-estimator">Estimators</a> ·
+  <a href="https://arxiv.org/abs/2509.20609">MMG paper</a> ·
+  <a href="https://github.com/fengsxy/Diffusion-MI/issues">Issues</a>
+</p>
 
-It provides:
-- A collection of neural MI estimators (DIME, MINE, NWJ, SMILE, MINDE,
-  MMG, etc.) exposed under the `dmi.estimators` namespace.
-- Lightweight synthetic benchmarks (e.g. correlated Gaussians and
-  self-consistency-style image tasks) to sanity-check estimator
-  behavior.
+Estimate how much information two continuous random variables share, directly from paired samples. **Diffusion-MI** brings diffusion estimators and neural baselines behind the same Python interface, so you can change methods without rewriting your data pipeline.
 
-The core estimators are implemented in PyTorch / PyTorch Lightning and
-are intended for both research experiments and practical use.
+- **Eight estimators:** MMG, MINDE, MINE, NWJ, SMILE, CPC, DoE, and DIME.
+- **Your arrays in, MI in nats out:** `fit(X_train, Y_train)` → `estimate(X_test, Y_test)`.
+- **Independent feature dimensions:** X and Y need paired rows, not identical widths.
+- **PyTorch on CPU or CUDA:** no dataset downloads or external experiment accounts needed for the quick start.
 
----
+**Names:** Diffusion-MI is the toolbox; **MMG is a method within it**. Install `diffusion-mi`, import `dmi`.
 
-### Installation
+## Install
 
-#### 1. From PyPI
-
-The recommended way to install DMI is:
-
-```bash
-pip install diffusion-mi
-```
-
-This installs:
-- The `diffusion-mi` package (imported as `dmi`), and
-- Required dependencies such as `torch` and `pytorch-lightning`.
-
-#### 2. From source
-
-From the repository root:
+Requires Python **3.9–3.12**. In a virtual environment:
 
 ```bash
-# Using poetry (recommended for development)
-poetry install
-
-# Or using pip
-pip install -e .
+python -m pip install diffusion-mi
 ```
 
-After installation you can import the package via:
+For the source version described by this README, including unreleased fixes:
 
-```python
-import dmi
+```bash
+git clone https://github.com/fengsxy/Diffusion-MI.git
+cd Diffusion-MI
+python -m pip install -e .
 ```
 
----
+PyTorch and the core scientific dependencies are installed automatically. For a CPU-only environment, install CPU PyTorch first:
 
-### Quick Start: Fit, Then Estimate MI on Your Own Data
+```bash
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -e .
+```
 
-You can apply any estimator to your own data `(X, Y)` as long as:
-- `X` and `Y` are arrays of shape `(n_samples, dim_x)` and
-  `(n_samples, dim_y)` respectively (NumPy arrays or similar), and
-- Their shapes are compatible with the estimator you choose.
+Image benchmark scripts have optional dependencies: `python -m pip install -e '.[images]'`.
 
-The typical workflow is always:
+## Quick start
 
-1. **Construct** an estimator with your desired hyperparameters.
-2. **Fit** it on training data via `.fit(X_train, Y_train, X_val=None, Y_val=None)`.
-3. **Estimate** MI on new data via `.estimate(X_test, Y_test)`.
+A complete example with separate training and test data, no downloads, and a known ground truth:
 
 ```python
 import numpy as np
-import dmi
+from dmi.estimators import MINEEstimator
 
-# Example: a simple 1D correlated Gaussian
-n_train, n_test = 2000, 1000
-dim_x, dim_y = 1, 1
-rho = 0.75
-rng = np.random.default_rng(0)
 
-def sample_gaussian(n, seed):
+def sample(n, seed):
     rng = np.random.default_rng(seed)
-    x = rng.normal(size=(n, dim_x))
-    eps = rng.normal(size=(n, dim_y))
-    y = rho * x + np.sqrt(1.0 - rho ** 2) * eps
+    x = rng.normal(size=(n, 1))
+    y = 0.75 * x + np.sqrt(1 - 0.75**2) * rng.normal(size=(n, 1))
     return x, y
 
-X_train, Y_train = sample_gaussian(n_train, seed=0)
-X_test, Y_test = sample_gaussian(n_test, seed=1)
 
-# Construct a neural MI estimator
-estimator = dmi.estimators.MINEEstimator(
-    learning_rate=1e-4,
-    batch_size=256,
-    max_n_steps=3000,
+X_train, Y_train = sample(2000, seed=0)
+X_test, Y_test = sample(1000, seed=1)
+
+estimator = MINEEstimator(
+    max_n_steps=500, batch_size=128, learning_rate=1e-3,
+    seed=42, early_stopping=False,
 )
-
-# 1) Fit on training data
 estimator.fit(X_train, Y_train)
+mi = estimator.estimate(X_test, Y_test)
 
-# 2) Estimate MI on held-out data
-mi_hat = estimator.estimate(X_test, Y_test)
-print("Estimated MI (MINE):", float(mi_hat))
+print(f"Estimated: {mi:.3f} nats")
+print(f"Analytic:  {-0.5 * np.log(1 - 0.75**2):.3f} nats")  # 0.413
 ```
 
-Notes on shapes and initialization:
+The estimate is stochastic and will not exactly equal the analytic value. This is an onboarding example, not a benchmark claim. Run the same example from the repository with `python examples/gaussian.py`.
 
-- Most estimators (CPC/DoE/NWJ/SMILE/MINE/DIME) can **infer**
-  `x_shape` / `y_shape` automatically from the first call to
-  `.fit(X, Y)`.
-- Diffusion/SDE-based estimators (`MINDEEstimator`, `MMGEstimator`)
-  also support lazy initialization: if you omit `x_shape` / `y_shape`
-  in the constructor, they will infer the shapes at the first
-  `.fit(X, Y, ...)` call and build their internal U-Net architectures
-  accordingly.
-
-In all cases, `.estimate(X, Y)` performs **no further training**: it
-uses the current model parameters to compute an MI estimate on the
-provided data.
-
----
-
-### Benchmarks and Synthetic Tasks
-
-This repository includes a few lightweight benchmark tasks that are
-useful for sanity-checking estimator behavior. They are not yet
-exposed as a stable public API, but can be imported directly from the
-source tree for experiments.
-
-- **Correlated Gaussian (stair benchmark)**
-  - File: `src/benchmark/stair/stair_benchmark.py`
-  - Class: `CorrelatedGaussianTask`
-  - Generates pairs `(X, Y)` of correlated Gaussians with known
-    ground-truth MI:
-
-    ```python
-    from benchmark.stair.stair_benchmark import CorrelatedGaussianTask
-
-    task = CorrelatedGaussianTask(name="gaussian-20d-0.5", dim=20, rho=0.5)
-    X, Y = task.sample(1000, seed=0)
-
-    print("Ground truth MI:", task.mutual_information)
-    ```
-
-- **Self-consistency image tasks**
-  - Files: under `src/benchmark/self-consistency/`
-  - Provide simple image-based tasks (MNIST/Fashion-MNIST/CIFAR10) in
-    which MI should satisfy known monotonicity / additivity patterns
-    when only parts of the image are revealed.
-
-These benchmarks are primarily intended for internal evaluation and
-may change; the core public surface of the package is
-`dmi.estimators`.
-
----
-
-### Available Neural MI Estimators
-
-The main estimators exposed via `dmi.estimators` include:
-
-- `CPCEstimator` — Contrastive Predictive Coding (CPC)-style
-  estimator.
-- `DoEEstimator` — Density-of-States style estimator.
-- `MINEEstimator` — Mutual Information Neural Estimator.
-- `NWJEstimator` — NWJ lower bound (an f-divergence based estimator).
-- `SMILEEstimator` — A stabilized MI lower-bound estimator.
-- `DIMEEstimator` — Diffusion-based MI estimator.
-- `MINDEEstimator` — SDE-based MI estimator, based on the MINDE
-  method (see arXiv:2310.09031).
-- `MMGEstimator` — Diffusion-based multi-modal MI estimator, based on
-  the MMG method (see arXiv:2509.20609).
-
-You can inspect the available estimators, for example, with:
+### Try MMG with the same interface
 
 ```python
-import dmi
-dir(dmi.estimators)
+from sklearn.preprocessing import StandardScaler
+from dmi.estimators import MMGEstimator
+
+# Fit preprocessing only on training data; reuse it for held-out data.
+sx, sy = StandardScaler().fit(X_train), StandardScaler().fit(Y_train)
+mmg = MMGEstimator(max_n_steps=1000, batch_size=256, seed=42)
+mmg.fit(sx.transform(X_train), sy.transform(Y_train))
+mi_mmg = mmg.estimate(sx.transform(X_test), sy.transform(Y_test))
 ```
 
-or import them directly:
+MMG supports optional validation data via `fit(X, Y, X_val, Y_val)`. MINDE standardizes using training statistics by default; MMG expects you to handle preprocessing. Diffusion estimators may need larger training and Monte Carlo budgets for useful accuracy.
+
+## Choose an estimator
+
+These descriptions refer to the implementations in this repository; a common API does not imply identical objectives, hyperparameters, or statistical guarantees.
+
+| Class in `dmi.estimators` | Approach | Practical consideration |
+| --- | --- | --- |
+| `MMGEstimator` | Diffusion / conditional–unconditional MMSE gap | This project's MMG method; standardize training and held-out data consistently. |
+| `MINDEEstimator` | Score-based diffusion / SDE | Built-in standardization; `mc_iter` controls Monte Carlo averaging. |
+| `MINEEstimator` | Neural Donsker–Varadhan objective | A compact starting point for checking your data pipeline. |
+| `NWJEstimator` | Variational f-divergence lower bound | Exponentials can produce high variance. |
+| `SMILEEstimator` | Clipped density-ratio objective | Clipping trades bias against variance. |
+| `CPCEstimator` | Contrastive / InfoNCE objective | Bound depends on negative count; pairwise scoring scales quadratically. |
+| `DoEEstimator` | Difference of marginal and conditional entropy estimates | Parametric density assumptions matter. |
+| `DIMEEstimator` | Discriminator-based density-ratio estimation | Supports GAN/KL/HD objectives; default pairwise scoring is quadratic. |
+
+## API and data contract
 
 ```python
 from dmi import estimators
-est = estimators.DIMEEstimator(...)
+
+model = estimators.NWJEstimator(max_n_steps=500, batch_size=128)
+model.fit(X_train, Y_train)               # returns model
+mi_nats = model.estimate(X_test, Y_test)  # returns a float; no training
+mi_bits = mi_nats / np.log(2)
 ```
 
----
+- The shared, tested path is **continuous vector data**: finite arrays of shape `(n_samples, dim_x)` and `(n_samples, dim_y)`. Convert a scalar variable with `x.reshape(-1, 1)`.
+- Row `i` of X and row `i` of Y must describe the same observation. Keep feature shapes fixed after fitting. At least two rows are required; very small datasets are suitable only for smoke tests.
+- `batch_size >= 2`; `max_n_steps` is the optimizer-step budget. For Lightning estimators, if both step and epoch limits are supplied, training stops at the first limit. With neither, the default is 1,000 steps.
+- `estimate()` requires a successful `fit()` and never updates learned weights. Sampling can make repeated calls return different estimates.
+- For plain PyTorch estimators, use `device="cpu"` or `device="cuda"`. Lightning estimators select one CUDA device when available, otherwise CPU. Device controls are not yet fully unified.
+- Validation arrays must be supplied together. MMG uses them for validation; MINDE uses them for monitoring. Other estimators currently accept these arguments but do not use them for validation-based early stopping.
+- Constructors infer feature shapes at first fit. Existing class names and direct imports remain available.
 
-### Environment and Dependencies
+### Interpreting results
 
-Typical requirements are:
+Use held-out samples, compare to synthetic cases with known MI, and repeat with several seeds. Finite-sample neural estimates can be negative or biased; this library does not clip them to zero. Larger training budgets alone do not guarantee accuracy. Compare methods on the same split and report sample count, preprocessing, training budget, seeds, and evaluation budget.
 
-- Python >= 3.9
-- PyTorch (`torch`)
-- PyTorch Lightning (`pytorch-lightning` / `lightning`)
+The unified interface is an **estimation API**, not a differentiable MI loss for end-to-end training. The common path does not automatically flatten images, encode categorical variables, or handle missing values. CPC and default DIME evaluation allocate an `n × n` score matrix; use a manageable held-out subset for large datasets.
 
-These are installed automatically when using `pip install diffusion-mi`.
+## Development and tests
 
----
+```bash
+python -m pip install -e . pytest build
+python -m pytest tests/test_public_api.py -q
+python -m build
+```
 
-### Citation and Acknowledgements
+The regression suite covers all eight public imports, small datasets, unequal feature dimensions, invalid inputs, step limits, checkpoint creation, and training-only preprocessing. The older stochastic Gaussian accuracy experiments are separate:
 
-The design of the estimators in this repository is inspired by
-several existing mutual-information estimators and diffusion-based
-methods. If you use this repository in academic work, please consider
-citing it as "Diffusion Mutual Information (DMI)" and, where
-appropriate, the original works listed below.
+```bash
+python -m pytest -m benchmark -q
+```
 
-**Estimator References (non-exhaustive)**
+See [the usability audit](docs/usability-audit.md) for reproduced failures, fixes, local verification, and remaining limitations. Research benchmark scripts live under `src/benchmark/` and are not a stable installed API.
 
-- `CPCEstimator` — Contrastive Predictive Coding (CPC) estimator,
-  based on:
-  - A. van den Oord, Y. Li, O. Vinyals, "Representation Learning with
-    Contrastive Predictive Coding", arXiv:1807.03748.
+Bug reports are most useful with a minimal example, array shapes, estimator parameters, Python/PyTorch versions, and a traceback. Contributions that add an estimator should implement the same `fit`/`estimate` contract and include a small public-API test.
 
-- `MINEEstimator` — Mutual Information Neural Estimation, based on:
-  - M. I. Belghazi et al., "Mutual Information Neural Estimation",
-    ICML 2018, arXiv:1801.04062.
+## Citation and acknowledgements
 
-- `NWJEstimator` — NWJ lower-bound estimator, using the Nguyen–
-  Wainwright–Jordan f-divergence bound:
-  - X. Nguyen, M. J. Wainwright, M. I. Jordan, "Estimating divergence
-    functionals and the likelihood ratio by convex risk minimization",
-    Annals of Statistics, 2010.
+If you use **MMG**, cite its method paper:
 
-- `SMILEEstimator` — Implementation of the SMILE mutual information
-  estimator; see the original SMILE MI paper for details.
+```bibtex
+@misc{yu2025mmg,
+  title={MMG: Mutual Information Estimation via the MMSE Gap in Diffusion},
+  author={Longxuan Yu and Xing Shi and Xianghao Kong and Tong Jia and Greg Ver Steeg},
+  year={2025},
+  eprint={2509.20609},
+  archivePrefix={arXiv},
+  primaryClass={cs.LG}
+}
+```
 
-- `DoEEstimator` — Density-of-States style estimator; this
-  implementation follows the DoE estimator found in MI benchmarking
-  codebases (e.g. `benchmark-mi`) and related literature.
-
-- `DIMEEstimator` — Diffusion-based MI estimator; this implementation
-  follows the DIME-style neural estimator from the diffusion MI
-  literature.
-
-- `MINDEEstimator` — SDE-based MI estimator, based on the MINDE
-  method:
-  - MINDE: see arXiv:2310.09031.
-
-- `MMGEstimator` — Diffusion-based multi-modal MI estimator, based on
-  the MMG method:
-  - MMG: see arXiv:2509.20609.
+Please also credit the original methods you evaluate, including [MINDE](https://arxiv.org/abs/2310.09031), [MINE](https://arxiv.org/abs/1801.04062), [CPC](https://arxiv.org/abs/1807.03748), and the authors of the other estimators. [Benchmarking Mutual Information](https://github.com/cbg-ethz/bmi) is an acknowledged source of inspiration for the benchmark workflow.

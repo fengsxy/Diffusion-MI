@@ -13,6 +13,8 @@ from ._critic import (
 )
 
 
+from ._validation import validate_inputs, validate_validation
+
 class Discriminator(nn.Module):
     def __init__(self, input_dim, output_dim):
         '''
@@ -63,7 +65,7 @@ class DIMEEstimator(L.LightningModule):
         learning_rate=1e-4,
         batch_size=256,
         max_n_steps=1000,
-        max_epochs=1,
+        max_epochs=None,
         hidden_layers=(256, 256),
         divergence='GAN',
         architecture='separable',
@@ -197,6 +199,9 @@ class DIMEEstimator(L.LightningModule):
             print(warning_message)
 
     def fit(self, X: np.ndarray, Y: np.ndarray, X_val=None, Y_val=None):
+        X, Y = validate_inputs(self, X, Y, fitting=True)
+        X_val, Y_val = validate_validation(X_val, Y_val, X, Y)
+        self._is_fitted = False
         # Infer shapes from data if not provided at construction time.
         if self.hparams.x_shape is None or self.hparams.y_shape is None:
             self.hparams.x_shape = X.shape[1:]
@@ -209,7 +214,7 @@ class DIMEEstimator(L.LightningModule):
             self.critic = self._create_critic()
 
         dataset = TensorDataset(X, Y)
-        dataloader = DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=min(self.hparams.batch_size, len(X)), shuffle=True, drop_last=True)
         
         trainer = TrainerFactory.configure_trainer(
             trainer_config=self.trainer_config,
@@ -220,8 +225,11 @@ class DIMEEstimator(L.LightningModule):
             test_num=self.hparams.test_num
         )
         trainer.fit(self, dataloader)
+        self._is_fitted = True
+        return self
 
     def estimate(self, X: np.ndarray, Y: np.ndarray) -> float:
+        X, Y = validate_inputs(self, X, Y)
         self.critic.eval()
         with torch.no_grad():
             X = torch.tensor(X, dtype=torch.float32).to(self.device)
@@ -364,7 +372,7 @@ if __name__ == '__main__':
         learning_rate=1e-4,
         batch_size=256,
         max_n_steps=1000,
-        max_epochs=1,
+        max_epochs=None,
         hidden_layers=(256, 256),
         divergence='GAN',
         architecture='separable',
