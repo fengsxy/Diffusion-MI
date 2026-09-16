@@ -10,6 +10,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
+pytestmark = pytest.mark.benchmark
+
+
 class _SimpleGaussianTask:
     """Simple synthetic correlated Gaussian task used for testing.
 

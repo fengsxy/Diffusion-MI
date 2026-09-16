@@ -20,26 +20,36 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-packages = [{include = "*", from = "src"}]
+packages = [{include = "dmi", from = "src"}, {include = "estimators", from = "src"}]
+include = [{path = "docs/assets/diffusion-mi-logo.png", format = "sdist"}]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"
 pytorch-lightning = "*"
 lightning = "*"
 torch = "*"
-torchvision = "*"
-torchaudio = "*"
+torchvision = {version = "*", optional = true}
 numpy = "*"
 scipy = "*"
 matplotlib = "*"
-tensorboardX = "*"
 tqdm = "*"
 scikit-learn = "*"
-huggingface-hub = "*"
+huggingface-hub = {version = "*", optional = true}
+
+[tool.poetry.extras]
+images = ["torchvision", "huggingface-hub"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7"
+build = ">=1"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["benchmark: stochastic accuracy experiments (run separately from regression tests)"]
 
 [tool.poetry.urls]
-Homepage = "https://github.com/fengsxy/mi_estimators"
-Repository = "https://github.com/fengsxy/mi_estimators.git"
+Homepage = "https://github.com/fengsxy/Diffusion-MI"
+Repository = "https://github.com/fengsxy/Diffusion-MI"
 
 [build-system]
 requires = ["poetry-core"]
