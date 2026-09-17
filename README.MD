@@ -21,21 +21,28 @@ Estimate how much information two continuous random variables share, directly fr
 
 **Names:** Diffusion-MI is the toolbox; **MMG is a method within it**. Install `diffusion-mi`, import `dmi`.
 
+## Package or paper code?
+
+| Resource | Use it for |
+| --- | --- |
+| **[Package: Diffusion-MI](https://github.com/fengsxy/Diffusion-MI)** (this repository) | Estimate MI on your own paired data, or compare estimators through a shared Python API. |
+| **[Code: Diffusion_MI](https://github.com/fengsxy/Diffusion_MI)** | Run the MMG paper's research experiments and reproduction workflows. |
+
+MMG is the method name in both resources; the repositories serve different workflows.
+
 ## Install
 
-Requires Python **3.9–3.12**. In a virtual environment:
+Requires Python **3.9–3.12**. Use a virtual environment.
 
-```bash
-python -m pip install diffusion-mi
-```
-
-For the source version described by this README, including unreleased fixes:
+**To follow this README, install from source.** The API and usability fixes documented here are on `main` but have not yet been released to PyPI:
 
 ```bash
 git clone https://github.com/fengsxy/Diffusion-MI.git
 cd Diffusion-MI
 python -m pip install -e .
 ```
+
+The previously published version remains available with `python -m pip install diffusion-mi`; it does not include these fixes.
 
 PyTorch and the core scientific dependencies are installed automatically. For a CPU-only environment, install CPU PyTorch first:
 
